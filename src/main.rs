@@ -8,40 +8,15 @@ use std::io::Read;
 use std::thread;
 use std::time::Duration;
 
-fn get_temperature(path: &str) -> f64 {
-    let mut file =
-        File::open(path).unwrap_or_else(|_| panic!("Could not open temperature file '{}'", path));
-    let mut buf = String::with_capacity(6);
-    file.read_to_string(&mut buf)
-        .expect("Failed to read temperature file");
-    let temp_int: i32 = buf
-        .strip_suffix('\n')
-        .unwrap_or(&buf)
-        .parse()
-        .expect("Temperature is not a 32-bit integer");
-    temp_int as f64 / 1000.0
-}
-
-fn calculate_duty_cycle(
+struct Config {
+    pwm: u8,
+    thermal_zone: u8,
+    poll_frequency: f64,
     temperature_steps: Vec<f64>,
     fan_speed_steps: Vec<f64>,
-    temperature: f64,
-) -> f64 {
-    if temperature < temperature_steps[0] {
-        return 0.0;
-    }
-    for i in 0..temperature_steps.len() - 1 {
-        if temperature_steps[i] <= temperature && temperature < temperature_steps[i+1] {
-            return (fan_speed_steps[i+1] - fan_speed_steps[i]) /
-            (temperature_steps[i+1] - temperature_steps[i]) *
-            (temperature - temperature_steps[i]) +
-            fan_speed_steps[i];
-        }
-    }
-    return *fan_speed_steps.last().unwrap();
 }
 
-fn main() -> Result<(), Box<dyn Error>> {
+fn get_configuration() -> Config {
     let matches = App::new("Raspberry Pi Fan Control")
         .version("0.1")
         .about("Set Raspberry Pi Fan based on CPU temperature")
@@ -105,20 +80,64 @@ fn main() -> Result<(), Box<dyn Error>> {
         .split(|c| c == ',' || c == ' ')
         .map(|x| x.parse().unwrap())
         .collect();
+    return Config{
+        pwm,
+        thermal_zone,
+        poll_frequency,
+        temperature_steps,
+        fan_speed_steps,
+    }
+}
+
+fn get_temperature(path: &str) -> f64 {
+    let mut file =
+        File::open(path).unwrap_or_else(|_| panic!("Could not open temperature file '{}'", path));
+    let mut buf = String::with_capacity(6);
+    file.read_to_string(&mut buf)
+        .expect("Failed to read temperature file");
+    let temp_int: i32 = buf
+        .strip_suffix('\n')
+        .unwrap_or(&buf)
+        .parse()
+        .expect("Temperature is not a 32-bit integer");
+    temp_int as f64 / 1000.0
+}
+
+fn calculate_duty_cycle(
+    temperature_steps: &Vec<f64>,
+    fan_speed_steps: &Vec<f64>,
+    temperature: f64,
+) -> f64 {
+    if temperature < temperature_steps[0] {
+        return 0.0;
+    }
+    for i in 0..temperature_steps.len() - 1 {
+        if temperature_steps[i] <= temperature && temperature < temperature_steps[i+1] {
+            return (fan_speed_steps[i+1] - fan_speed_steps[i]) /
+            (temperature_steps[i+1] - temperature_steps[i]) *
+            (temperature - temperature_steps[i]) +
+            fan_speed_steps[i];
+        }
+    }
+    return *fan_speed_steps.last().unwrap();
+}
+
+fn main() -> Result<(), Box<dyn Error>> {
+    let config = get_configuration();
 
     // let pwm = Pwm::with_frequency(Channel::Pwm0, 25.0, 0.0, Polarity::Normal, true)?;
 
     // Sleep for 1500 ms (1.5 s)
     // thread::sleep(Duration::from_millis(1500));
 
-    let temperature: f64 = get_temperature(format!("/sys/class/thermal/thermal_zone{}/temp", thermal_zone).as_str());
-    let duty_cycle: f64 = calculate_duty_cycle(temperature_steps, fan_speed_steps, temperature);
+    let temperature: f64 = get_temperature(format!("/sys/class/thermal/thermal_zone{}/temp", config.thermal_zone).as_str());
+    let duty_cycle: f64 = calculate_duty_cycle(&config.temperature_steps, &config.fan_speed_steps, temperature);
 
     // pwm.set_duty_cycle(duty_cycle)?;
 
     println!(
         "Current pwm={}, poll_frequency={}, temperature={}, duty_cycle={}",
-        pwm, poll_frequency, temperature, duty_cycle
+        config.pwm, config.poll_frequency, temperature, duty_cycle
     );
 
     Ok(())
