@@ -16,6 +16,12 @@ struct Config {
     fan_speed_steps: Vec<f64>,
 }
 
+impl Config {
+    fn temp_filename(&self) -> String {
+        return format!("/sys/class/thermal/thermal_zone{}/temp", self.thermal_zone);
+    }
+}
+
 fn get_configuration() -> Config {
     let matches = App::new("Raspberry Pi Fan Control")
         .version("0.1")
@@ -124,21 +130,16 @@ fn calculate_duty_cycle(
 
 fn main() -> Result<(), Box<dyn Error>> {
     let config = get_configuration();
+    let pwm = Pwm::with_frequency(Channel::Pwm0, 25.0, 0.0, Polarity::Normal, true)?;
+    println!("Raspberry Pi Fan Controller using PWM{}, polling every {} seconds", config.pwm, config.poll_frequency);
+    loop {
+        let temperature: f64 = get_temperature(config.temp_filename().as_str());
+        let duty_cycle: f64 = calculate_duty_cycle(&config.temperature_steps, &config.fan_speed_steps, temperature);
+        pwm.set_duty_cycle(duty_cycle)?;
+        println!("Current temperature={}, duty_cycle={}", temperature, duty_cycle);
+        thread::sleep(Duration::from_millis((config.poll_frequency * 1000.0) as u64));
+    }
 
-    // let pwm = Pwm::with_frequency(Channel::Pwm0, 25.0, 0.0, Polarity::Normal, true)?;
-
-    // Sleep for 1500 ms (1.5 s)
-    // thread::sleep(Duration::from_millis(1500));
-
-    let temperature: f64 = get_temperature(format!("/sys/class/thermal/thermal_zone{}/temp", config.thermal_zone).as_str());
-    let duty_cycle: f64 = calculate_duty_cycle(&config.temperature_steps, &config.fan_speed_steps, temperature);
-
-    // pwm.set_duty_cycle(duty_cycle)?;
-
-    println!(
-        "Current pwm={}, poll_frequency={}, temperature={}, duty_cycle={}",
-        config.pwm, config.poll_frequency, temperature, duty_cycle
-    );
 
     Ok(())
 }
